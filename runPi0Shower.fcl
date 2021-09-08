@@ -1,0 +1,48 @@
+#include "services_dune.fcl"
+#include "Pi0Shower.fcl"
+
+process_name: testUtils
+
+services:
+{
+  # Load the service that manages root files for histograms.
+  TFileService: { fileName: "pi0_shower_out.root" } 
+  TimeTracker:       {}
+  MemoryTracker:     {}
+  RandomNumberGenerator: {} #ART native random number generator
+  message:              @local::dune_message_services_prod_debug
+  FileCatalogMetadata:  @local::art_file_catalog_mc
+                        @table::protodune_services
+  PdspChannelMapService:        @local::pdspchannelmap
+  ChannelStatusService:         @local::pdsp_channel_status
+  BackTrackerService: {
+    BackTracker: {
+      SimChannelModuleLabel: "tpcrawdecoder:simpleSC"
+      G4ModuleLabel: "largeant"
+      MinimumHitEnergyFraction: 1e-1
+    }
+  }
+}
+services.message.destinations.LogStandardOut.threshold: "INFO"
+
+#source is now a root file
+source:
+{
+  module_type: RootInput
+  maxEvents: -1
+  fileNames: ["input_file.root"]
+}
+
+physics:
+{
+ analyzers:
+ {
+  shower:          @local::proto_pi0_shower
+ }
+
+ ana2:  [ shower ]
+
+ end_paths:     [ ana2 ]
+}
+
+physics.analyzers.trkUtil.CalibrationParsSCE: @local::CalorimetryParameters_SPProd4_MC_SCE 

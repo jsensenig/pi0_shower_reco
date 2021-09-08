@@ -1,0 +1,35 @@
+#include "ProtoDUNEDataUtils.fcl"
+#include "ProtoDUNECalibration.fcl"
+
+BEGIN_PROLOG
+
+proto_pi0_shower:
+{
+   module_type:             "ShowerVerification"
+   CalorimetryTag:          "pandoracalo"
+   TrackerTag:              "pandoraTrack"
+   ShowerTag:               "pandoraShower"
+   PFParticleTag:           "pandora"
+   GeneratorTag:            "generator"
+   HitTag:                  "hitpdune"
+   SliceTag:                "pandora"
+   fCollectionCnnCut:       0.5
+   fInductionCnnCut:        0.9
+   Verbose:                 true
+   SphereRadius:            60.0
+   DataUtils: @local::standard_protodunedatautils
+  
+   CalibrationParsSCE: @local::CalorimetryParameters_SPProd2_MC_SCE
+   CalibrationParsSCE: @local::CalorimetryParameters_SPProd2_MC_35ms
+
+   DBScan:
+   {
+     eps: 5.0
+     epstwo: 5.0
+     minPts: 2
+     Method: 2
+   }
+}
+
+
+END_PROLOG
