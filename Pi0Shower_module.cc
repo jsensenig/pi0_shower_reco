@@ -71,12 +71,29 @@ namespace protoana {
   class Pi0Shower;
 
   // Functions to fit a line to a cluster of points
+  double Dist2D( double x1, double y1, double x2, double y2 );
   double distance2(double x, double y, double z, double * p);
   void line(double t, double * p, double & x, double & y, double & z);
   void SumDistance2(int &, double *, double & sum, double * par, int);
   TVector3 FitLine(const std::vector<TVector3> & input);
 
+  struct ClusterProps {
+
+    explicit ClusterProps(double r, double x, double y, double a, double aspan, double l, double q) : 
+                          dist(r), dirX(x), dirY(y), angle(a), angle_span(aspan), len(l), charge(q) { }
+
+    double dist;
+    double dirX;
+    double dirY;
+    double angle;
+    double angle_span;
+    double len;
+    double charge;
+  };
+
 }
+
+//protoana::ClusterProps::ClusterProps() : dist(0.), dirX(0.), dirY(0.), angle(0.), angle_span(0.), len(0.), charge(0.) { }
 
 class protoana::Pi0Shower : public art::EDAnalyzer {
 public:
@@ -96,9 +113,10 @@ public:
 
   // Required functions.
   void analyze(art::Event const & e) override;
-  void ClassifyHits( const art::Event &evt );
-  void ClusterHits( const art::Event &evt, std::vector<art::Ptr<recob::Hit>> &hitvec );
-  void PolarClusterMerging( const art::Event &evt, std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> &plane_cluster_map );
+  std::vector<art::Ptr<recob::Hit>> ClassifyHits( const art::Event &evt );
+  std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> ClusterHits( const art::Event &evt, std::vector<art::Ptr<recob::Hit>> &hitvec );
+  void PolarClusterMerging( const art::Event &evt, std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> &plane_cluster_map, std::pair<size_t, float> &beam_vertex );
+  protoana::ClusterProps CharacterizeCluster( const std::vector<const recob::Hit*> &clusterHits, std::pair<size_t, float> &beam_vertex );
   void TransformPoint( TVector3& point, const TVector3& shower_start, const TVector3& shower_dir );
   void reset();
 
@@ -186,13 +204,26 @@ void protoana::Pi0Shower::analyze(art::Event const & evt)
       std::cout << "Found no Geant particle!" << std::endl; 
       return; 
     }
-  
     std::cout << "Beam particle PDG: " << beam_particle->PdgCode() << std::endl;
-
   }
 
+  // Start by getting the reco PF beam particle
+  // We can use its interaction vertex as a reference frame for the shower analysis
+  std::vector<const recob::PFParticle*> beamParticles = pfpUtil.GetPFParticlesFromBeamSlice( evt, fPFParticleTag );
+  std::vector<const recob::Hit*> beam_hits = pfpUtil.GetPFParticleHitsFromPlane( *beamParticles.at(0), evt, fPFParticleTag, 2); 
+
+  // Get the beam particle interaction vertex, this translates to the max channel on the collection plane
+  std::pair<size_t, float> max_channel_time(0, 0.0);
+  for( auto hit : beam_hits ) if( hit->Channel() > max_channel_time.first ) max_channel_time = std::make_pair( hit->Channel(), hit->PeakTime() );
+
   // Step 1. Classify hit with CNN
-  ClassifyHits( evt );
+  auto selected_hits = ClassifyHits( evt );
+
+  // 2. Cluster selected hits into shower segments using DBScan
+  auto clustered_hit_map = ClusterHits( evt, selected_hits );
+
+  // Step 3. First stage merging of clusters
+  PolarClusterMerging( evt, clustered_hit_map, max_channel_time );
 
   fTree -> Fill(); 
 
@@ -200,7 +231,7 @@ void protoana::Pi0Shower::analyze(art::Event const & evt)
 
 
 // Step 1. Select only the Hits which are EM-like as classified by the CNN
-void protoana::Pi0Shower::ClassifyHits( const art::Event &evt ) {
+std::vector<art::Ptr<recob::Hit>> protoana::Pi0Shower::ClassifyHits( const art::Event &evt ) {
 
   // Helper to get hits and the 4 associated CNN outputs
   // CNN Outputs: EM, Track, Michel, Empty
@@ -245,10 +276,12 @@ void protoana::Pi0Shower::ClassifyHits( const art::Event &evt ) {
 
   }
 
+  return selected_hits;
+
 }
 
 // Step 2. Cluster the selected hits in time/channel for each plane
-void protoana::Pi0Shower::ClusterHits( const art::Event &evt, std::vector<art::Ptr<recob::Hit>> &hitvec ) {
+std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> protoana::Pi0Shower::ClusterHits( const art::Event &evt, std::vector<art::Ptr<recob::Hit>> &hitvec ) {
 
   // Try DBScan to cluster hits in channel/time 
 
@@ -286,15 +319,113 @@ void protoana::Pi0Shower::ClusterHits( const art::Event &evt, std::vector<art::P
     }
   }
 
+  return plane_cluster_map;
 
 }
 
 
-// Step 3. Cluster shower segments using polar coordinate merging
-void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> &plane_cluster_map ) {
+// Step 3. Cluster shower segments using polar coordinate merging (map is <planeID, <clusterID, Hit_vector>> )
+void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> &plane_cluster_map, std::pair<size_t, float> &beam_vertex ) {
 
+  std::vector<ClusterProps> clusters_properties;
+  std::vector<size_t> clusterID;
+
+  // Loop over each (3) wire plane
+  for( auto &plane : plane_cluster_map ) {
+    if( plane.first != 2 ) continue; // only collection plane for now
+    for( auto &cluster : plane.second ) { // Loop over each cluster in the plane
+      clusterID.push_back( cluster.first );
+      clusters_properties.push_back( CharacterizeCluster(cluster.second, beam_vertex) );
+    }
+  }
+
+  // Sort the clusters from closest (upstream) to farthest (downstream) from the beam vertex
+  std::sort(clusters_properties.begin(), clusters_properties.end(), [] ( ClusterProps& a, ClusterProps& b ) { return a.dist < b.dist; });
+
+  // Now try to merge shower segments under 3 conditions (upstream means closest to beam vertex)
+  // 1. Upstream cluster Q > downstream cluster
+  // 2. Downstream cluster angle within angle span of upstream cluster
+  // 3. Distance between up/downstream clusters < length of upstream cluster
+
+  // Try to merge the "jth" cluster into the "ith" cluster
+  // The "ith" cluster is always upstream of the "jth" cluster
+  bool still_merging = true;
+  while( still_merging ) {
+    still_merging = false;
+    for( size_t up = 0; up < clusters_properties.size(); up++ ) {
+      for( size_t down = up+1; down < clusters_properties.size(); down++ ) { 
+        double halfspan = 0.5 * clusters_properties.at(up).angle_span;
+        if( clusters_properties.at(up).charge < clusters_properties.at(down).charge ) continue; // (1.)
+        if( ((clusters_properties.at(up).angle - halfspan) > clusters_properties.at(down).angle) &&
+            ((clusters_properties.at(up).angle + halfspan) < clusters_properties.at(down).angle) ) continue; // (2.)
+        if( (clusters_properties.at(down).dist - clusters_properties.at(up).dist) > clusters_properties.at(up).len ) continue; // (3.)
+                                                                                                                                       
+         MergeCluster( HITS, STRUCT )
+         //ClusterProps clustered( clusters_properties.at(up).dist, )
+        // Assign the upstream cluster ID to downstream cluster if merged
+        clusterID.at(down) = clusterID.at(up);
+        std::cout << "Cluster ID: " << " merged!" << std::endl;
+        still_merging = true;
+      }
+    }
+  }
 }
 
+protoana::ClusterProps MergeCluster( up_cluster, down_cluster ) {
+  double dist = up_cluster.dist
+  double x = 
+  double y =
+  double angle = // re-fit the cluster Hits
+  double aspan =
+  double len =
+  double q =
+}
+
+// Characterize the clusters, beam_vertex = <PeakTime, Channel>
+protoana::ClusterProps protoana::Pi0Shower::CharacterizeCluster( const std::vector<const recob::Hit*> &clusterHits, std::pair<size_t, float> &beam_vertex ) {
+
+  double clusterQ = 0.;
+  double rmin = 1000., rmax = 0.;
+  double anglemin = 1000., anglemax = 0.;
+  std::vector<TVector3> fit_hits_vec(clusterHits.size());
+
+  for( auto hit : clusterHits ) {
+    double ptime   = static_cast<double>(hit->PeakTime()); // from float
+    double channel = static_cast<double>(hit->Channel());  // from size_t
+    double charge  = static_cast<double>(hit->Integral()); // from float
+
+    // Create 3D vectors with x,y,z = time,channel,charge
+    fit_hits_vec.emplace_back( TVector3(ptime, channel, charge) );
+
+    // Get shower start/end
+    double r = Dist2D(beam_vertex.first, beam_vertex.second, channel, ptime);
+    if( r < rmin ) rmin = r; // shower start
+    if( r > rmax ) rmax = r; // shower end
+
+    double angle = TMath::ACos( beam_vertex.first / r ); // angle wrt x-axis (channel)
+    if( angle < anglemin ) anglemin = angle; 
+    if( angle > anglemax ) anglemax = angle; 
+
+    // Get the shower total charge
+    clusterQ += charge;
+  }
+
+  // Fit the (Time, Channel, Charge) points to get a charge-weighted direction for the shower
+  TVector3 shower_segment_dir = FitLine( fit_hits_vec );
+  double r = Dist2D(beam_vertex.first, beam_vertex.second, shower_segment_dir.X(), shower_segment_dir.Y());
+  double cluster_angle = TMath::ACos( shower_segment_dir.X() / r );
+
+  // Shower length
+  double len = rmax - rmin;
+
+  // Shower angle span
+  double angle_span = anglemax - anglemin;
+
+  // return ClusterProps structure of the shower segement properties
+  ClusterProps return_props( rmin, shower_segment_dir.X(), shower_segment_dir.Y(), cluster_angle, angle_span, len, clusterQ );
+  return return_props;
+
+}
 
 // Transform a point to a shifted (shower_start origin) and rotated (z-axis parallel to shower_dir)
 void protoana::Pi0Shower::TransformPoint( TVector3& point, const TVector3& shower_start, const TVector3& shower_dir ) {
@@ -309,6 +440,10 @@ void protoana::Pi0Shower::TransformPoint( TVector3& point, const TVector3& showe
 
 }
 
+// 2D distance helper function
+double protoana::Dist2D( double x1, double y1, double x2, double y2 ) {
+  return sqrt( pow((x1 - x2), 2) + pow((y1 - y2), 2) );
+}
 
 // Fit a line to short shower segments with least square fit.
 // Copied from PDSP_Analyzer, thanks Jake!
