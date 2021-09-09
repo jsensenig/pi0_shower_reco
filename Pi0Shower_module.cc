@@ -117,6 +117,7 @@ public:
   void PolarClusterMerging( const art::Event &evt, std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> &plane_cluster_map, std::pair<size_t, float> &beam_vertex );
   void MergeCluster( ClusterProps &up_cluster, ClusterProps &down_cluster );
   protoana::ClusterProps CharacterizeCluster( std::vector<const recob::Hit*> &clusterHits, std::pair<size_t, float> &beam_vertex );
+  std::vector<int> GetHitPdg( std::vector<const recob::Hit*> &hitvec, detinfo::DetectorClocksData const& clockData );
   void TransformPoint( TVector3& point, const TVector3& shower_start, const TVector3& shower_dir );
   void reset();
 
@@ -156,6 +157,18 @@ private:
 
   /// Beam slice hits
   std::vector<double> selected_hits_channel, selected_hits_time;
+
+  /// Clustered hits
+  
+  // DBScan clusters
+  std::vector<std::vector<double>> coll_hits_channel_dbscan, coll_hits_time_dbscan, coll_hits_charge_dbscan;
+  std::vector<std::vector<double>> ind0_hits_channel_dbscan, ind0_hits_time_dbscan, ind0_hits_charge_dbscan;
+  std::vector<std::vector<double>> ind1_hits_channel_dbscan, ind1_hits_time_dbscan, ind1_hits_charge_dbscan;
+
+  // Polar Merged clusters
+  std::vector<std::vector<double>> coll_hits_channel_polar_merge, coll_hits_time_polar_merge, coll_hits_charge_polar_merge;
+  std::vector<std::vector<double>> ind0_hits_channel_polar_merge, ind0_hits_time_polar_merge, ind0_hits_charge_polar_merge;
+  std::vector<std::vector<double>> ind1_hits_channel_polar_merge, ind1_hits_time_polar_merge, ind1_hits_charge_polar_merge;
 
 };
 
@@ -355,7 +368,6 @@ void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<s
                                                                                                                                           
       // Try to merge the "jth" cluster into the "ith" cluster
       // The "ith" cluster is always upstream of the "jth" cluster
-                                                                                                                                          
       for( size_t up = 0; up < clusters.second.size(); up++ ) {
         for( size_t down = up+1; down < clusters.second.size(); down++ ) { 
                                                                                                                                           
@@ -447,6 +459,41 @@ protoana::ClusterProps protoana::Pi0Shower::CharacterizeCluster( std::vector<con
   ClusterProps return_props( rmin, shower_segment_dir.X(), shower_segment_dir.Y(), cluster_angle, angle_span, len, clusterQ );
   return_props.hits = clusterHits;
   return return_props;
+
+}
+
+// Function to label the PDG of the Hits
+std::vector<int> protoana::Pi0Shower::GetHitPdg( std::vector<const recob::Hit*> &hitvec, detinfo::DetectorClocksData const& clockData ) {
+
+  // Function that loops over all hits in an event and returns those that an MCParticle
+  // contributed to.
+  bool use_eve = true;
+  std::vector<int> hit_pdg_vec;
+ 
+  // Backtrack all hits to verify whether they belong to the current MCParticle.
+  art::ServiceHandle<cheat::BackTrackerService> bt_serv;
+  art::ServiceHandle<cheat::ParticleInventoryService> pi_serv;
+
+  for(const recob::Hit* hit : hitvec) {
+    if (use_eve) {
+      for(const sim::TrackIDE & ide : bt_serv->HitToEveTrackIDEs(clockData, *hit)) {
+        int trackId = ide.trackID;
+        const simb::MCParticle* mcpart = 0x0;
+        mcpart = pi_serv->TrackIdToParticle_P(trackId);
+        if( mcpart != 0x0 ) hit_pdg_vec.emplace_back( mcpart->PdgCode() );
+        else hit_pdg_vec.emplace_back( -999 );
+      }
+    } else {
+      for(const int trackId : bt_serv->HitToTrackIds(clockData, *hit)) {
+        const simb::MCParticle* mcpart = 0x0;
+        mcpart = pi_serv->TrackIdToParticle_P(trackId);
+        if( mcpart != 0x0 ) hit_pdg_vec.emplace_back( mcpart->PdgCode() );
+        else hit_pdg_vec.emplace_back( -999 );
+      }
+    }
+  }
+
+  return hit_pdg_vec;
 
 }
 
@@ -586,6 +633,15 @@ void protoana::Pi0Shower::reset()
   /// Beam slice hits
   selected_hits_channel.clear();
   selected_hits_time.clear();
+
+  coll_hits_channel_dbscan.clear(); coll_hits_time_dbscan.clear(); coll_hits_charge_dbscan.clear();
+  ind0_hits_channel_dbscan.clear(); ind0_hits_time_dbscan.clear(); ind0_hits_charge_dbscan.clear();
+  ind1_hits_channel_dbscan.clear(); ind1_hits_time_dbscan.clear(); ind1_hits_charge_dbscan.clear();
+
+  coll_hits_channel_polar_merge.clear(); coll_hits_time_polar_merge.clear(); coll_hits_charge_polar_merge.clear();  
+  ind0_hits_channel_polar_merge.clear(); ind0_hits_time_polar_merge.clear(); ind0_hits_charge_polar_merge.clear();
+  ind1_hits_channel_polar_merge.clear(); ind1_hits_time_polar_merge.clear(); ind1_hits_charge_polar_merge.clear();
+
 
 }
 
