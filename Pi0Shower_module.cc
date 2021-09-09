@@ -117,7 +117,7 @@ public:
   void PolarClusterMerging( const art::Event &evt, std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> &plane_cluster_map, std::pair<size_t, float> &beam_vertex );
   void MergeCluster( ClusterProps &up_cluster, ClusterProps &down_cluster );
   protoana::ClusterProps CharacterizeCluster( std::vector<const recob::Hit*> &clusterHits, std::pair<size_t, float> &beam_vertex );
-  std::vector<int> GetHitPdg( std::vector<const recob::Hit*> &hitvec, detinfo::DetectorClocksData const& clockData );
+  std::vector<int> GetHitPdg( const art::Event &evt, std::vector<const recob::Hit*> &hitvec );
   void TransformPoint( TVector3& point, const TVector3& shower_start, const TVector3& shower_dir );
   void reset();
 
@@ -161,11 +161,13 @@ private:
   /// Clustered hits
   
   // DBScan clusters
+  std::vector<std::vector<int>> coll_hit_pdg_dbscan, ind0_hit_pdg_dbscan,  ind1_hit_pdg_dbscan;
   std::vector<std::vector<double>> coll_hits_channel_dbscan, coll_hits_time_dbscan, coll_hits_charge_dbscan;
   std::vector<std::vector<double>> ind0_hits_channel_dbscan, ind0_hits_time_dbscan, ind0_hits_charge_dbscan;
   std::vector<std::vector<double>> ind1_hits_channel_dbscan, ind1_hits_time_dbscan, ind1_hits_charge_dbscan;
 
   // Polar Merged clusters
+  std::vector<std::vector<int>> coll_hit_pdg_polar_merge, ind0_hit_pdg_polar_merge,  ind1_hit_pdg_polar_merge;
   std::vector<std::vector<double>> coll_hits_channel_polar_merge, coll_hits_time_polar_merge, coll_hits_charge_polar_merge;
   std::vector<std::vector<double>> ind0_hits_channel_polar_merge, ind0_hits_time_polar_merge, ind0_hits_charge_polar_merge;
   std::vector<std::vector<double>> ind1_hits_channel_polar_merge, ind1_hits_time_polar_merge, ind1_hits_charge_polar_merge;
@@ -331,6 +333,54 @@ std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> protoana::Pi0
     }
   }
 
+  // Label hits and fill the histograms
+  for( auto &plane : plane_cluster_map ) { // wire plane
+    for( auto &cluster : plane.second ) { // cluster
+      // Select the plane
+      switch( plane.first ) {
+        case 0: {
+                  ind0_hit_pdg_dbscan.push_back( GetHitPdg( evt, cluster.second ) );
+                  ind0_hits_channel_dbscan.push_back( std::vector<double>() );
+                  ind0_hits_time_dbscan.push_back( std::vector<double>() );
+                  ind0_hits_charge_dbscan.push_back( std::vector<double>() ); 
+                  for( auto &hit : cluster.second ) {
+                    ind0_hits_channel_dbscan.back().emplace_back( hit->Channel() );
+                    ind0_hits_time_dbscan.back().emplace_back( hit->PeakTime() );
+                    ind0_hits_charge_dbscan.back().emplace_back( hit->Integral() );
+                  }
+                  break;
+                }  
+        case 1: {
+                  ind1_hit_pdg_dbscan.push_back( GetHitPdg( evt, cluster.second ) );
+                  ind1_hits_channel_dbscan.push_back( std::vector<double>() );
+                  ind1_hits_time_dbscan.push_back( std::vector<double>() );
+                  ind1_hits_charge_dbscan.push_back( std::vector<double>() ); 
+                  for( auto &hit : cluster.second ) {
+                    ind1_hits_channel_dbscan.back().emplace_back( hit->Channel() );
+                    ind1_hits_time_dbscan.back().emplace_back( hit->PeakTime() );
+                    ind1_hits_charge_dbscan.back().emplace_back( hit->Integral() );
+                  }
+                  break;
+                }
+        case 2: {
+                  coll_hit_pdg_dbscan.push_back( GetHitPdg( evt, cluster.second ) );
+                  coll_hits_channel_dbscan.push_back( std::vector<double>() );
+                  coll_hits_time_dbscan.push_back( std::vector<double>() );
+                  coll_hits_charge_dbscan.push_back( std::vector<double>() ); 
+                  for( auto &hit : cluster.second ) {                               
+                    coll_hits_channel_dbscan.back().emplace_back( hit->Channel() );
+                    coll_hits_time_dbscan.back().emplace_back( hit->PeakTime() );
+                    coll_hits_charge_dbscan.back().emplace_back( hit->Integral() );
+                  }
+                  break;
+                }
+        default: 
+                 std::cout << "Unknown plane! " << plane.first << std::endl;
+                 break;
+      } //switch
+    } //cluster
+  } //plane
+
   return plane_cluster_map;
 
 }
@@ -388,6 +438,55 @@ void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<s
       } // ith loop
     } // while loop
   } // plane loop
+
+  // Label hits and fill the histograms
+  for( auto &plane : plane_cluster ) { // wire plane
+    for( auto &cluster : plane.second ) { // cluster
+      // Select the plane
+      switch( plane.first ) {
+        case 0: {
+                  ind0_hit_pdg_polar_merge.push_back( GetHitPdg( evt, cluster.hits ) );
+                  ind0_hits_channel_polar_merge.push_back( std::vector<double>() );
+                  ind0_hits_time_polar_merge.push_back( std::vector<double>() );
+                  ind0_hits_charge_polar_merge.push_back( std::vector<double>() ); 
+                  for( auto &hit : cluster.hits ) {
+                    ind0_hits_channel_polar_merge.back().emplace_back( hit->Channel() );
+                    ind0_hits_time_polar_merge.back().emplace_back( hit->PeakTime() );
+                    ind0_hits_charge_polar_merge.back().emplace_back( hit->Integral() );
+                  }
+                  break;
+                }  
+        case 1: {
+                  ind1_hit_pdg_polar_merge.push_back( GetHitPdg( evt, cluster.hits ) );
+                  ind1_hits_channel_polar_merge.push_back( std::vector<double>() );
+                  ind1_hits_time_polar_merge.push_back( std::vector<double>() );
+                  ind1_hits_charge_polar_merge.push_back( std::vector<double>() ); 
+                  for( auto &hit : cluster.hits ) {
+                    ind1_hits_channel_polar_merge.back().emplace_back( hit->Channel() );
+                    ind1_hits_time_polar_merge.back().emplace_back( hit->PeakTime() );
+                    ind1_hits_charge_polar_merge.back().emplace_back( hit->Integral() );
+                  }
+                  break;
+                }
+        case 2: {
+                  coll_hit_pdg_polar_merge.push_back( GetHitPdg( evt, cluster.hits ) );
+                  coll_hits_channel_polar_merge.push_back( std::vector<double>() );
+                  coll_hits_time_polar_merge.push_back( std::vector<double>() );
+                  coll_hits_charge_polar_merge.push_back( std::vector<double>() ); 
+                  for( auto &hit : cluster.hits ) {                               
+                    coll_hits_channel_polar_merge.back().emplace_back( hit->Channel() );
+                    coll_hits_time_polar_merge.back().emplace_back( hit->PeakTime() );
+                    coll_hits_charge_polar_merge.back().emplace_back( hit->Integral() );
+                  }
+                  break;
+                }
+        default: 
+                 std::cout << "Unknown plane! " << plane.first << std::endl;
+                 break;
+      } //switch
+    } //cluster
+  } //plane
+ 
 }
 
 // Essentially the += operator for merging the ClusterProps structure
@@ -463,7 +562,9 @@ protoana::ClusterProps protoana::Pi0Shower::CharacterizeCluster( std::vector<con
 }
 
 // Function to label the PDG of the Hits
-std::vector<int> protoana::Pi0Shower::GetHitPdg( std::vector<const recob::Hit*> &hitvec, detinfo::DetectorClocksData const& clockData ) {
+std::vector<int> protoana::Pi0Shower::GetHitPdg( const art::Event &evt, std::vector<const recob::Hit*> &hitvec ) {
+
+  auto const clockData = art::ServiceHandle<detinfo::DetectorClocksService>()->DataFor(evt);
 
   // Function that loops over all hits in an event and returns those that an MCParticle
   // contributed to.
@@ -474,6 +575,7 @@ std::vector<int> protoana::Pi0Shower::GetHitPdg( std::vector<const recob::Hit*> 
   art::ServiceHandle<cheat::BackTrackerService> bt_serv;
   art::ServiceHandle<cheat::ParticleInventoryService> pi_serv;
 
+  // Loop over each hit and attempt to get the MC particle which createed it. If no MC particle give it PDG = -999
   for(const recob::Hit* hit : hitvec) {
     if (use_eve) {
       for(const sim::TrackIDE & ide : bt_serv->HitToEveTrackIDEs(clockData, *hit)) {
@@ -616,6 +718,40 @@ void protoana::Pi0Shower::beginJob()
   fTree->Branch("selected_hits_channel", &selected_hits_channel);
   fTree->Branch("selected_hits_time", &selected_hits_time);
 
+  /// Hits ///
+
+  // DBScan step
+  // Hit PDG by plane                                                                                                                   
+  fTree->Branch("coll_hit_pdg_dbscan", &coll_hit_pdg_dbscan);
+  fTree->Branch("ind0_hit_pdg_dbscan", &ind0_hit_pdg_dbscan);
+  fTree->Branch("ind1_hit_pdg_dbscan", &ind1_hit_pdg_dbscan);
+  // Hits per cluster for each plane
+  fTree->Branch("coll_hits_channel_dbscan", &coll_hits_channel_dbscan);
+  fTree->Branch("coll_hits_time_dbscan", &coll_hits_time_dbscan);
+  fTree->Branch("coll_hits_charge_dbscan", &coll_hits_charge_dbscan);
+  fTree->Branch("ind0_hits_channel_dbscan", &ind0_hits_channel_dbscan);
+  fTree->Branch("ind0_hits_time_dbscan", &ind0_hits_time_dbscan);
+  fTree->Branch("ind0_hits_charge_dbscan", &ind0_hits_charge_dbscan);
+  fTree->Branch("ind1_hits_channel_dbscan", &ind1_hits_channel_dbscan);
+  fTree->Branch("ind1_hits_time_dbscan", &ind1_hits_time_dbscan);
+  fTree->Branch("ind1_hits_charge_dbscan", &ind1_hits_charge_dbscan);
+
+  // Polar Clustering step
+  // Hit PDG by plane
+  fTree->Branch("coll_hit_pdg_polar_merge", &coll_hit_pdg_polar_merge);
+  fTree->Branch("ind0_hit_pdg_polar_merge", &ind0_hit_pdg_polar_merge);
+  fTree->Branch("ind1_hit_pdg_polar_merge", &ind1_hit_pdg_polar_merge);
+  // Hits per cluster for each plane
+  fTree->Branch("coll_hits_channel_polar_merge", &coll_hits_channel_polar_merge);
+  fTree->Branch("coll_hits_time_polar_merge", &coll_hits_time_polar_merge);
+  fTree->Branch("coll_hits_charge_polar_merge", &coll_hits_charge_polar_merge);
+  fTree->Branch("ind0_hits_channel_polar_merge", &ind0_hits_channel_polar_merge);
+  fTree->Branch("ind0_hits_time_polar_merge", &ind0_hits_time_polar_merge);
+  fTree->Branch("ind0_hits_charge_polar_merge", &ind0_hits_charge_polar_merge);
+  fTree->Branch("ind1_hits_channel_polar_merge", &ind1_hits_channel_polar_merge);
+  fTree->Branch("ind1_hits_time_polar_merge", &ind1_hits_time_polar_merge);
+  fTree->Branch("ind1_hits_charge_polar_merge", &ind1_hits_charge_polar_merge);
+
 }
 
 void protoana::Pi0Shower::endJob()
@@ -634,10 +770,13 @@ void protoana::Pi0Shower::reset()
   selected_hits_channel.clear();
   selected_hits_time.clear();
 
+  coll_hit_pdg_dbscan.clear(); ind0_hit_pdg_dbscan.clear();  ind1_hit_pdg_dbscan.clear();
   coll_hits_channel_dbscan.clear(); coll_hits_time_dbscan.clear(); coll_hits_charge_dbscan.clear();
   ind0_hits_channel_dbscan.clear(); ind0_hits_time_dbscan.clear(); ind0_hits_charge_dbscan.clear();
   ind1_hits_channel_dbscan.clear(); ind1_hits_time_dbscan.clear(); ind1_hits_charge_dbscan.clear();
 
+  
+  coll_hit_pdg_polar_merge.clear(); ind0_hit_pdg_polar_merge.clear();  ind1_hit_pdg_polar_merge.clear();
   coll_hits_channel_polar_merge.clear(); coll_hits_time_polar_merge.clear(); coll_hits_charge_polar_merge.clear();  
   ind0_hits_channel_polar_merge.clear(); ind0_hits_time_polar_merge.clear(); ind0_hits_charge_polar_merge.clear();
   ind1_hits_channel_polar_merge.clear(); ind1_hits_time_polar_merge.clear(); ind1_hits_charge_polar_merge.clear();
