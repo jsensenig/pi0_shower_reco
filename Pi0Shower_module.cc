@@ -326,52 +326,56 @@ std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> protoana::Pi0
 // Step 3. Cluster shower segments using polar coordinate merging (map is <planeID, <clusterID, Hit_vector>> )
 void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> &plane_cluster_map, std::pair<size_t, float> &beam_vertex ) {
 
-  std::vector<ClusterProps> clusters;
+  std::map<size_t, std::vector<ClusterProps>> plane_cluster;
 
   // Loop over each (3) wire plane
   for( auto &plane : plane_cluster_map ) {
-    if( plane.first != 2 ) continue; // only collection plane for now
+    //if( plane.first != 2 ) continue; // only collection plane for now
     for( auto &cluster : plane.second ) { // Loop over each cluster in the plane
-      clusters.push_back( CharacterizeCluster(cluster.second, beam_vertex) );
+      plane_cluster[plane.first].push_back( CharacterizeCluster(cluster.second, beam_vertex) );
     }
   }
 
-  // Sort the clusters from closest (upstream) to farthest (downstream) from the beam vertex
-  std::sort(clusters.begin(), clusters.end(), [] ( ClusterProps& a, ClusterProps& b ) { return a.dist < b.dist; });
+  // Sort the clusters from closest (upstream) to farthest (downstream) from the beam vertex for each of the wire planes
+  for( auto plane_cls : plane_cluster ) {
+    std::sort(plane_cls.second.begin(), plane_cls.second.end(), [] ( ClusterProps& a, ClusterProps& b ) { return a.dist < b.dist; });
+  }
 
   // Now try to merge shower segments under 3 conditions (upstream means closest to beam vertex)
   // 1. Upstream cluster Q > downstream cluster
   // 2. Downstream cluster angle within angle span of upstream cluster
   // 3. Distance between up/downstream clusters < length of upstream cluster
 
-  
-  // Loop over the merging until no more showers are merged  
-  bool still_merging = true;
-  while( still_merging ) {
-    still_merging = false;
-
-    // Try to merge the "jth" cluster into the "ith" cluster
-    // The "ith" cluster is always upstream of the "jth" cluster
-
-    for( size_t up = 0; up < clusters.size(); up++ ) {
-      for( size_t down = up+1; down < clusters.size(); down++ ) { 
-
-        double halfspan = 0.5 * clusters.at(up).angle_span;
-        if( clusters.at(up).charge < clusters.at(down).charge ) continue; // (1.)
-        if( ((clusters.at(up).angle - halfspan) > clusters.at(down).angle) &&
-            ((clusters.at(up).angle + halfspan) < clusters.at(down).angle) ) continue; // (2.)
-        if( (clusters.at(down).dist - clusters.at(up).dist) > clusters.at(up).len ) continue; // (3.)
-                                                                                                                                       
-        // Merge the downstream into upstream cluster, MergeCluster() reference arguemnts avoids a copy of the merged structure
-        MergeCluster( clusters.at(up), clusters.at(down) );
-        clusters.erase(clusters.begin() + down); // now remove the merged cluster
-
-        std::cout << "Cluster ID: "  << " merged! Remaining clusters: " << clusters.size() << std::endl;
-        still_merging = true;
-
-      } // jth loop
-    } // ith loop
-  } // while loop
+  // Merge clusters for each wire plane
+  for( auto clusters : plane_cluster ) {
+    // Loop over the merging until no more showers are merged  
+    bool still_merging = true;
+    while( still_merging ) {
+      still_merging = false;
+                                                                                                                                          
+      // Try to merge the "jth" cluster into the "ith" cluster
+      // The "ith" cluster is always upstream of the "jth" cluster
+                                                                                                                                          
+      for( size_t up = 0; up < clusters.second.size(); up++ ) {
+        for( size_t down = up+1; down < clusters.second.size(); down++ ) { 
+                                                                                                                                          
+          double halfspan = 0.5 * clusters.second.at(up).angle_span;
+          if( clusters.second.at(up).charge < clusters.second.at(down).charge ) continue; // (1.)
+          if( ((clusters.second.at(up).angle - halfspan) > clusters.second.at(down).angle) &&
+              ((clusters.second.at(up).angle + halfspan) < clusters.second.at(down).angle) ) continue; // (2.)
+          if( (clusters.second.at(down).dist - clusters.second.at(up).dist) > clusters.second.at(up).len ) continue; // (3.)
+                                                                                                                                         
+          // Merge the downstream into upstream cluster, MergeCluster() reference arguemnts avoids a copy of the merged structure
+          MergeCluster( clusters.second.at(up), clusters.second.at(down) );
+          clusters.second.erase(clusters.second.begin() + down); // now remove the merged cluster
+                                                                                                                                          
+          std::cout << "Cluster ID: "  << " merged! Remaining clusters: " << clusters.second.size() << std::endl;
+          still_merging = true;
+                                                                                                                                          
+        } // jth loop
+      } // ith loop
+    } // while loop
+  } // plane loop
 }
 
 // Essentially the += operator for merging the ClusterProps structure
