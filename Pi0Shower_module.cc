@@ -115,7 +115,7 @@ public:
   std::vector<art::Ptr<recob::Hit>> ClassifyHits( const art::Event &evt );
   std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> ClusterHits( const art::Event &evt, std::vector<art::Ptr<recob::Hit>> &hitvec );
   void PolarClusterMerging( const art::Event &evt, std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> &plane_cluster_map, std::pair<size_t, float> &beam_vertex );
-  protoana::ClusterProps MergeCluster( ClusterProps &up_cluster, ClusterProps &down_cluster );
+  void MergeCluster( ClusterProps &up_cluster, ClusterProps &down_cluster );
   protoana::ClusterProps CharacterizeCluster( std::vector<const recob::Hit*> &clusterHits, std::pair<size_t, float> &beam_vertex );
   void TransformPoint( TVector3& point, const TVector3& shower_start, const TVector3& shower_dir );
   void reset();
@@ -208,6 +208,7 @@ void protoana::Pi0Shower::analyze(art::Event const & evt)
   // Start by getting the reco PF beam particle
   // We can use its interaction vertex as a reference frame for the shower analysis
   std::vector<const recob::PFParticle*> beamParticles = pfpUtil.GetPFParticlesFromBeamSlice( evt, fPFParticleTag );
+  if( beamParticles.empty() ) { std::cout << "No beam particle found!" << std::endl; return; }
   std::vector<const recob::Hit*> beam_hits = pfpUtil.GetPFParticleHitsFromPlane( *beamParticles.at(0), evt, fPFParticleTag, 2); 
 
   // Get the beam particle interaction vertex, this translates to the max channel on the collection plane
@@ -326,13 +327,11 @@ std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> protoana::Pi0
 void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> &plane_cluster_map, std::pair<size_t, float> &beam_vertex ) {
 
   std::vector<ClusterProps> clusters;
-  std::vector<size_t> clusterID;
 
   // Loop over each (3) wire plane
   for( auto &plane : plane_cluster_map ) {
     if( plane.first != 2 ) continue; // only collection plane for now
     for( auto &cluster : plane.second ) { // Loop over each cluster in the plane
-      clusterID.push_back( cluster.first );
       clusters.push_back( CharacterizeCluster(cluster.second, beam_vertex) );
     }
   }
@@ -345,11 +344,15 @@ void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<s
   // 2. Downstream cluster angle within angle span of upstream cluster
   // 3. Distance between up/downstream clusters < length of upstream cluster
 
-  // Try to merge the "jth" cluster into the "ith" cluster
-  // The "ith" cluster is always upstream of the "jth" cluster
+  
+  // Loop over the merging until no more showers are merged  
   bool still_merging = true;
   while( still_merging ) {
     still_merging = false;
+
+    // Try to merge the "jth" cluster into the "ith" cluster
+    // The "ith" cluster is always upstream of the "jth" cluster
+
     for( size_t up = 0; up < clusters.size(); up++ ) {
       for( size_t down = up+1; down < clusters.size(); down++ ) { 
 
@@ -359,39 +362,40 @@ void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<s
             ((clusters.at(up).angle + halfspan) < clusters.at(down).angle) ) continue; // (2.)
         if( (clusters.at(down).dist - clusters.at(up).dist) > clusters.at(up).len ) continue; // (3.)
                                                                                                                                        
-        // Assign the upstream cluster ID to downstream cluster if merged
-        clusterID.at(down) = clusterID.at(up);
-
-        // Merge the downstream into upstream cluster
-        clusters.at(up) = MergeCluster( clusters.at(up), clusters.at(down) );
+        // Merge the downstream into upstream cluster, MergeCluster() reference arguemnts avoids a copy of the merged structure
+        MergeCluster( clusters.at(up), clusters.at(down) );
         clusters.erase(clusters.begin() + down); // now remove the merged cluster
 
-        std::cout << "Cluster ID: " << " merged!" << std::endl;
+        std::cout << "Cluster ID: "  << " merged! Remaining clusters: " << clusters.size() << std::endl;
         still_merging = true;
 
-      }
-    }
-  }
+      } // jth loop
+    } // ith loop
+  } // while loop
 }
 
 // Essentially the += operator for merging the ClusterProps structure
-protoana::ClusterProps protoana::Pi0Shower::MergeCluster( ClusterProps &up_cluster, ClusterProps &down_cluster ) {
+void protoana::Pi0Shower::MergeCluster( ClusterProps &up_cluster, ClusterProps &down_cluster ) {
+
+  // No need to re-fill these variables
+
   //up_cluster.dist 
   //up_cluster.angle // re-fit the cluster Hits
+ 
+  // TODO should recalculate angle_span
   //up_cluster.angle_span
   
   up_cluster.len += down_cluster.len;
   up_cluster.charge += down_cluster.charge;
   up_cluster.hits.insert(up_cluster.hits.begin(), down_cluster.hits.begin(), down_cluster.hits.end());
 
+  // Unfortunately we need to redo the charge-weighted Hit fit`
   std::vector<TVector3> tvec;
   for( auto hit : up_cluster.hits ) tvec.emplace_back( TVector3(hit->Channel(), hit->PeakTime(), hit->Integral()) );
   TVector3 newdir = FitLine( tvec );
 
   up_cluster.dirX = newdir.X();
   up_cluster.dirY = newdir.Y();
-
-  return up_cluster;
 
 }
 
@@ -514,6 +518,7 @@ TVector3 protoana::FitLine(const std::vector<TVector3> & input) {
 
   double arglist[10];
 
+  // set minimum print level
   arglist[0] = -1;
   min->ExecuteCommand("SET PRINT",arglist,1);
 
