@@ -45,4 +45,3 @@ physics:
  end_paths:     [ ana2 ]
 }
 
-physics.analyzers.trkUtil.CalibrationParsSCE: @local::CalorimetryParameters_SPProd4_MC_SCE 

@@ -41,7 +41,6 @@
 
 #include "lardataobj/RawData/RDTimeStamp.h"
 #include "dune/DuneObj/ProtoDUNEBeamEvent.h"
-#include "protoduneana/Utilities/ProtoDUNECalibration.h"
 
 #include "protoduneana/Utilities/ProtoDUNETrackUtils.h"
 #include "protoduneana/Utilities/ProtoDUNEShowerUtils.h"
@@ -81,7 +80,6 @@ namespace protoana {
 
     explicit ClusterProps(double r, double x, double y, double a, double aspan, double l, double q) : 
                           dist(r), dirX(x), dirY(y), angle(a), angle_span(aspan), len(l), charge(q) { }
-
     double dist;
     double dirX;
     double dirY;
@@ -89,6 +87,7 @@ namespace protoana {
     double angle_span;
     double len;
     double charge;
+    std::vector<const recob::Hit*> hits;
   };
 
 }
@@ -116,7 +115,8 @@ public:
   std::vector<art::Ptr<recob::Hit>> ClassifyHits( const art::Event &evt );
   std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> ClusterHits( const art::Event &evt, std::vector<art::Ptr<recob::Hit>> &hitvec );
   void PolarClusterMerging( const art::Event &evt, std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> &plane_cluster_map, std::pair<size_t, float> &beam_vertex );
-  protoana::ClusterProps CharacterizeCluster( const std::vector<const recob::Hit*> &clusterHits, std::pair<size_t, float> &beam_vertex );
+  protoana::ClusterProps MergeCluster( ClusterProps &up_cluster, ClusterProps &down_cluster );
+  protoana::ClusterProps CharacterizeCluster( std::vector<const recob::Hit*> &clusterHits, std::pair<size_t, float> &beam_vertex );
   void TransformPoint( TVector3& point, const TVector3& shower_start, const TVector3& shower_dir );
   void reset();
 
@@ -144,7 +144,6 @@ private:
   protoana::ProtoDUNESliceUtils sliceUtil;
   protoana::ProtoDUNEShowerUtils showerUtil;
   art::ServiceHandle<geo::Geometry> geom;
-  protoana::ProtoDUNECalibration calibration_SCE;
 
   art::ServiceHandle< cheat::ParticleInventoryService > pi_serv;
   art::ServiceHandle< cheat::BackTrackerService > bt_serv;
@@ -174,8 +173,7 @@ protoana::Pi0Shower::Pi0Shower(fhicl::ParameterSet const & p)
   fHitTag(p.get<std::string>("HitTag")),
   fCollectionCnnCut(p.get<double>("CollectionCNNCut")),
   fInductionCnnCut(p.get<double>("InductionCNNCut")),
-  dataUtil(p.get<fhicl::ParameterSet>("DataUtils")),
-  calibration_SCE(p.get<fhicl::ParameterSet>("CalibrationParsSCE"))
+  dataUtil(p.get<fhicl::ParameterSet>("DataUtils"))
 {
 
 }
@@ -327,7 +325,7 @@ std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> protoana::Pi0
 // Step 3. Cluster shower segments using polar coordinate merging (map is <planeID, <clusterID, Hit_vector>> )
 void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<size_t, std::map<size_t, std::vector<const recob::Hit*>>> &plane_cluster_map, std::pair<size_t, float> &beam_vertex ) {
 
-  std::vector<ClusterProps> clusters_properties;
+  std::vector<ClusterProps> clusters;
   std::vector<size_t> clusterID;
 
   // Loop over each (3) wire plane
@@ -335,12 +333,12 @@ void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<s
     if( plane.first != 2 ) continue; // only collection plane for now
     for( auto &cluster : plane.second ) { // Loop over each cluster in the plane
       clusterID.push_back( cluster.first );
-      clusters_properties.push_back( CharacterizeCluster(cluster.second, beam_vertex) );
+      clusters.push_back( CharacterizeCluster(cluster.second, beam_vertex) );
     }
   }
 
   // Sort the clusters from closest (upstream) to farthest (downstream) from the beam vertex
-  std::sort(clusters_properties.begin(), clusters_properties.end(), [] ( ClusterProps& a, ClusterProps& b ) { return a.dist < b.dist; });
+  std::sort(clusters.begin(), clusters.end(), [] ( ClusterProps& a, ClusterProps& b ) { return a.dist < b.dist; });
 
   // Now try to merge shower segments under 3 conditions (upstream means closest to beam vertex)
   // 1. Upstream cluster Q > downstream cluster
@@ -352,37 +350,53 @@ void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<s
   bool still_merging = true;
   while( still_merging ) {
     still_merging = false;
-    for( size_t up = 0; up < clusters_properties.size(); up++ ) {
-      for( size_t down = up+1; down < clusters_properties.size(); down++ ) { 
-        double halfspan = 0.5 * clusters_properties.at(up).angle_span;
-        if( clusters_properties.at(up).charge < clusters_properties.at(down).charge ) continue; // (1.)
-        if( ((clusters_properties.at(up).angle - halfspan) > clusters_properties.at(down).angle) &&
-            ((clusters_properties.at(up).angle + halfspan) < clusters_properties.at(down).angle) ) continue; // (2.)
-        if( (clusters_properties.at(down).dist - clusters_properties.at(up).dist) > clusters_properties.at(up).len ) continue; // (3.)
+    for( size_t up = 0; up < clusters.size(); up++ ) {
+      for( size_t down = up+1; down < clusters.size(); down++ ) { 
+
+        double halfspan = 0.5 * clusters.at(up).angle_span;
+        if( clusters.at(up).charge < clusters.at(down).charge ) continue; // (1.)
+        if( ((clusters.at(up).angle - halfspan) > clusters.at(down).angle) &&
+            ((clusters.at(up).angle + halfspan) < clusters.at(down).angle) ) continue; // (2.)
+        if( (clusters.at(down).dist - clusters.at(up).dist) > clusters.at(up).len ) continue; // (3.)
                                                                                                                                        
-         MergeCluster( HITS, STRUCT )
-         //ClusterProps clustered( clusters_properties.at(up).dist, )
         // Assign the upstream cluster ID to downstream cluster if merged
         clusterID.at(down) = clusterID.at(up);
+
+        // Merge the downstream into upstream cluster
+        clusters.at(up) = MergeCluster( clusters.at(up), clusters.at(down) );
+        clusters.erase(clusters.begin() + down); // now remove the merged cluster
+
         std::cout << "Cluster ID: " << " merged!" << std::endl;
         still_merging = true;
+
       }
     }
   }
 }
 
-protoana::ClusterProps MergeCluster( up_cluster, down_cluster ) {
-  double dist = up_cluster.dist
-  double x = 
-  double y =
-  double angle = // re-fit the cluster Hits
-  double aspan =
-  double len =
-  double q =
+// Essentially the += operator for merging the ClusterProps structure
+protoana::ClusterProps protoana::Pi0Shower::MergeCluster( ClusterProps &up_cluster, ClusterProps &down_cluster ) {
+  //up_cluster.dist 
+  //up_cluster.angle // re-fit the cluster Hits
+  //up_cluster.angle_span
+  
+  up_cluster.len += down_cluster.len;
+  up_cluster.charge += down_cluster.charge;
+  up_cluster.hits.insert(up_cluster.hits.begin(), down_cluster.hits.begin(), down_cluster.hits.end());
+
+  std::vector<TVector3> tvec;
+  for( auto hit : up_cluster.hits ) tvec.emplace_back( TVector3(hit->Channel(), hit->PeakTime(), hit->Integral()) );
+  TVector3 newdir = FitLine( tvec );
+
+  up_cluster.dirX = newdir.X();
+  up_cluster.dirY = newdir.Y();
+
+  return up_cluster;
+
 }
 
 // Characterize the clusters, beam_vertex = <PeakTime, Channel>
-protoana::ClusterProps protoana::Pi0Shower::CharacterizeCluster( const std::vector<const recob::Hit*> &clusterHits, std::pair<size_t, float> &beam_vertex ) {
+protoana::ClusterProps protoana::Pi0Shower::CharacterizeCluster( std::vector<const recob::Hit*> &clusterHits, std::pair<size_t, float> &beam_vertex ) {
 
   double clusterQ = 0.;
   double rmin = 1000., rmax = 0.;
@@ -423,6 +437,7 @@ protoana::ClusterProps protoana::Pi0Shower::CharacterizeCluster( const std::vect
 
   // return ClusterProps structure of the shower segement properties
   ClusterProps return_props( rmin, shower_segment_dir.X(), shower_segment_dir.Y(), cluster_angle, angle_span, len, clusterQ );
+  return_props.hits = clusterHits;
   return return_props;
 
 }
