@@ -22,7 +22,7 @@ proto_pi0_shower:
    {
      eps: 5.0
      epstwo: 5.0
-     minPts: 2
+     minPts: 3
      Method: 2
      Metric: 0
    }
