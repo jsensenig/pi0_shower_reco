@@ -160,6 +160,11 @@ private:
 
   /// Clustered hits
   
+  // Pre-cut/cluster
+  std::vector<double> coll_hits_channel_initial, coll_hits_time_initial, coll_hits_charge_initial;
+  std::vector<double> ind0_hits_channel_initial, ind0_hits_time_initial, ind0_hits_charge_initial;
+  std::vector<double> ind1_hits_channel_initial, ind1_hits_time_initial, ind1_hits_charge_initial;
+
   // DBScan clusters
   std::vector<std::vector<int>> coll_hit_pdg_dbscan, ind0_hit_pdg_dbscan,  ind1_hit_pdg_dbscan;
   std::vector<std::vector<double>> coll_hits_channel_dbscan, coll_hits_time_dbscan, coll_hits_charge_dbscan;
@@ -279,6 +284,32 @@ std::vector<art::Ptr<recob::Hit>> protoana::Pi0Shower::ClassifyHits( const art::
     // Make a seperate cut on collection and induction planes
     // the induction planes are noisier than collection so make a tighter cut on them e.g. >0.9 ind. and >0.5 coll.
     size_t thePlane = hit.get()->WireID().asPlaneID().Plane;
+    
+    // Save all the intial hits, pre-cut by plane
+    switch( thePlane ) {
+      case 0: {
+                ind0_hits_channel_initial.emplace_back( hit.get()->Channel() );
+                ind0_hits_time_initial.emplace_back( hit.get()->PeakTime() );
+                ind0_hits_charge_initial.emplace_back( hit.get()->Integral() );
+                break;
+              }  
+      case 1: {
+                ind1_hits_channel_initial.emplace_back( hit.get()->Channel() );
+                ind1_hits_time_initial.emplace_back( hit.get()->PeakTime() );
+                ind1_hits_charge_initial.emplace_back( hit.get()->Integral() );
+                break;
+              }
+      case 2: {
+                coll_hits_channel_initial.emplace_back( hit.get()->Channel() );
+                coll_hits_time_initial.emplace_back( hit.get()->PeakTime() );
+                coll_hits_charge_initial.emplace_back( hit.get()->Integral() );
+                break;
+              }
+      default: 
+               std::cout << "Unknown plane! " << thePlane << std::endl;
+               break;
+    } //switch
+
     if( (thePlane == 2 && em_score < fCollectionCnnCut) || (thePlane != 2 && em_score < fInductionCnnCut) ) continue;
 
     selected_hits.emplace_back( hit );
@@ -410,7 +441,7 @@ void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<s
   // 3. Distance between up/downstream clusters < length of upstream cluster
 
   // Merge clusters for each wire plane
-  for( auto clusters : plane_cluster ) {
+  for( auto &clusters : plane_cluster ) {
     // Loop over the merging until no more showers are merged  
     bool still_merging = true;
     while( still_merging ) {
@@ -431,7 +462,7 @@ void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<s
           MergeCluster( clusters.second.at(up), clusters.second.at(down) );
           clusters.second.erase(clusters.second.begin() + down); // now remove the merged cluster
                                                                                                                                           
-          std::cout << "Cluster ID: "  << " merged! Remaining clusters: " << clusters.second.size() << std::endl;
+          std::cout << "Cluster merged on plane " << clusters.first << " Remaining clusters: " << clusters.second.size() << std::endl;
           still_merging = true;
                                                                                                                                           
         } // jth loop
@@ -719,6 +750,17 @@ void protoana::Pi0Shower::beginJob()
   fTree->Branch("selected_hits_time", &selected_hits_time);
 
   /// Hits ///
+  
+  // Hits per cluster for each plane
+  fTree->Branch("coll_hits_channel_initial", &coll_hits_channel_initial);
+  fTree->Branch("coll_hits_time_initial", &coll_hits_time_initial);
+  fTree->Branch("coll_hits_charge_initial", &coll_hits_charge_initial);
+  fTree->Branch("ind0_hits_channel_initial", &ind0_hits_channel_initial);
+  fTree->Branch("ind0_hits_time_initial", &ind0_hits_time_initial);
+  fTree->Branch("ind0_hits_charge_initial", &ind0_hits_charge_initial);
+  fTree->Branch("ind1_hits_channel_initial", &ind1_hits_channel_initial);
+  fTree->Branch("ind1_hits_time_initial", &ind1_hits_time_initial);
+  fTree->Branch("ind1_hits_charge_initial", &ind1_hits_charge_initial);
 
   // DBScan step
   // Hit PDG by plane                                                                                                                   
@@ -770,12 +812,18 @@ void protoana::Pi0Shower::reset()
   selected_hits_channel.clear();
   selected_hits_time.clear();
 
+  // Pre-cut
+  coll_hits_channel_initial.clear(); coll_hits_time_initial.clear(); coll_hits_charge_initial.clear();
+  ind0_hits_channel_initial.clear(); ind0_hits_time_initial.clear(); ind0_hits_charge_initial.clear();
+  ind1_hits_channel_initial.clear(); ind1_hits_time_initial.clear(); ind1_hits_charge_initial.clear();
+
+  // DBScan step
   coll_hit_pdg_dbscan.clear(); ind0_hit_pdg_dbscan.clear();  ind1_hit_pdg_dbscan.clear();
   coll_hits_channel_dbscan.clear(); coll_hits_time_dbscan.clear(); coll_hits_charge_dbscan.clear();
   ind0_hits_channel_dbscan.clear(); ind0_hits_time_dbscan.clear(); ind0_hits_charge_dbscan.clear();
   ind1_hits_channel_dbscan.clear(); ind1_hits_time_dbscan.clear(); ind1_hits_charge_dbscan.clear();
 
-  
+  // Polar cluster step
   coll_hit_pdg_polar_merge.clear(); ind0_hit_pdg_polar_merge.clear();  ind1_hit_pdg_polar_merge.clear();
   coll_hits_channel_polar_merge.clear(); coll_hits_time_polar_merge.clear(); coll_hits_charge_polar_merge.clear();  
   ind0_hits_channel_polar_merge.clear(); ind0_hits_time_polar_merge.clear(); ind0_hits_charge_polar_merge.clear();
