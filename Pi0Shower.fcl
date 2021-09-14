@@ -20,8 +20,8 @@ proto_pi0_shower:
   
    DBScanAlg:
    {
-     eps: 5.0
-     epstwo: 5.0
+     eps: 0.6
+     epstwo: 0.6
      minPts: 3
      Method: 2
      Metric: 0

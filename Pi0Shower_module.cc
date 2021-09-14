@@ -87,6 +87,7 @@ namespace protoana {
     double angle_span;
     double len;
     double charge;
+    TVector3 dirXY;
     std::vector<const recob::Hit*> hits;
   };
 
@@ -156,6 +157,7 @@ private:
   int event;
 
   /// Beam slice hits
+  double beam_vertex_hit_channel, beam_vertex_hit_time;
   std::vector<double> selected_hits_channel, selected_hits_time;
 
   /// Clustered hits
@@ -234,6 +236,8 @@ void protoana::Pi0Shower::analyze(art::Event const & evt)
   // Get the beam particle interaction vertex, this translates to the max channel on the collection plane
   std::pair<size_t, float> max_channel_time(0, 0.0);
   for( auto hit : beam_hits ) if( hit->Channel() > max_channel_time.first ) max_channel_time = std::make_pair( hit->Channel(), hit->PeakTime() );
+  beam_vertex_hit_channel = max_channel_time.first;
+  beam_vertex_hit_time = max_channel_time.second;
 
   // Step 1. Classify hit with CNN
   auto selected_hits = ClassifyHits( evt );
@@ -456,6 +460,9 @@ void protoana::Pi0Shower::PolarClusterMerging( const art::Event &evt, std::map<s
           if( clusters.second.at(up).charge < clusters.second.at(down).charge ) continue; // (1.)
           if( ((clusters.second.at(up).angle - halfspan) > clusters.second.at(down).angle) &&
               ((clusters.second.at(up).angle + halfspan) < clusters.second.at(down).angle) ) continue; // (2.)
+          //////////////////////
+          if( clusters.second.at(up).dirXY.Dot(clusters.second.at(down).dirXY) < 0.9) continue;
+          //////////////////////
           if( (clusters.second.at(down).dist - clusters.second.at(up).dist) > clusters.second.at(up).len ) continue; // (3.)
                                                                                                                                          
           // Merge the downstream into upstream cluster, MergeCluster() reference arguemnts avoids a copy of the merged structure
@@ -542,6 +549,7 @@ void protoana::Pi0Shower::MergeCluster( ClusterProps &up_cluster, ClusterProps &
 
   up_cluster.dirX = newdir.X();
   up_cluster.dirY = newdir.Y();
+  up_cluster.dirXY = newdir;
 
 }
 
@@ -553,7 +561,7 @@ protoana::ClusterProps protoana::Pi0Shower::CharacterizeCluster( std::vector<con
   double anglemin = 1000., anglemax = 0.;
   std::vector<TVector3> fit_hits_vec(clusterHits.size());
 
-  for( auto hit : clusterHits ) {
+  for( auto &hit : clusterHits ) {
     double ptime   = static_cast<double>(hit->PeakTime()); // from float
     double channel = static_cast<double>(hit->Channel());  // from size_t
     double charge  = static_cast<double>(hit->Integral()); // from float
@@ -588,6 +596,7 @@ protoana::ClusterProps protoana::Pi0Shower::CharacterizeCluster( std::vector<con
   // return ClusterProps structure of the shower segement properties
   ClusterProps return_props( rmin, shower_segment_dir.X(), shower_segment_dir.Y(), cluster_angle, angle_span, len, clusterQ );
   return_props.hits = clusterHits;
+  return_props.dirXY = shower_segment_dir;
   return return_props;
 
 }
@@ -746,6 +755,8 @@ void protoana::Pi0Shower::beginJob()
   fTree->Branch("event", &event);
  
   /// Beam slice hits
+  fTree->Branch("beam_vertex_hit_channel", &beam_vertex_hit_channel);
+  fTree->Branch("beam_vertex_hit_time", &beam_vertex_hit_time);
   fTree->Branch("selected_hits_channel", &selected_hits_channel);
   fTree->Branch("selected_hits_time", &selected_hits_time);
 
@@ -809,6 +820,8 @@ void protoana::Pi0Shower::reset()
   event = -999;
 
   /// Beam slice hits
+  beam_vertex_hit_channel = -999;
+  beam_vertex_hit_time = -999;
   selected_hits_channel.clear();
   selected_hits_time.clear();
 
